@@ -5,8 +5,8 @@ from telegram import Bot
 import os
 
 # Credenciales seguras desde la nube
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-CHAT_ID = os.environ.get('CHAT_ID')
+TELEGRAM_TOKEN = os.environ.get(8460636135:AAF-Uw4qwrJ3ct7cJ0SyP9-Gty2-oVSLgic)
+CHAT_ID = os.environ.get(5574325279)
 
 async def generar_senial_y_enviar():
     # 1. Obtener datos de EUR/USD
