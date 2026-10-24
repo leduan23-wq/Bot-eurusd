@@ -18,14 +18,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Credenciales y variables de entorno
+# Credenciales y variables de entorno (compatible con GOOGLE_API_KEY y GEMINI_API_KEY)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 # Inicializar Google Gemini
-genai.configure(api_key=GEMINI_API_KEY)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 # Inicializar Flask y la App de Telegram
@@ -121,7 +122,6 @@ def run_async_loop(l):
     asyncio.set_event_loop(l)
     l.run_forever()
 
-# Iniciar el bucle de asyncio en un hilo separado de fondo
 threading.Thread(target=run_async_loop, args=(loop,), daemon=True).start()
 
 async def setup_webhook():
@@ -130,7 +130,6 @@ async def setup_webhook():
     await telegram_app.bot.set_webhook(url=webhook_endpoint)
     logger.info(f"Webhook configurado en: {webhook_endpoint}")
 
-# Ejecutar la configuración inicial del webhook de forma segura en el bucle
 asyncio.run_coroutine_threadsafe(setup_webhook(), loop)
 
 # ---------------------------------------------------------
