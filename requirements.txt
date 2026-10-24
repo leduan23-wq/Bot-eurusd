@@ -1,6 +1,4 @@
-yfinance
-matplotlib
-pandas
-requests
 python-telegram-bot
+google-generativeai
+matplotlib
 numpy
