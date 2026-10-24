@@ -24,10 +24,10 @@ GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 
-# Inicializar Google Gemini
+# Inicializar Google Gemini con el modelo correcto
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-3.8-flash')
 
 # Inicializar Flask y la App de Telegram
 app = Flask(__name__)
