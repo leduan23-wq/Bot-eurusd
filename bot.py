@@ -1,159 +1,113 @@
-
 import os
-import asyncio
-
 import yfinance as yf
-import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
-from telegram import Bot
+# Cargar las credenciales desde las variables de entorno de GitHub Secrets
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
+bot = Bot(token=TOKEN)
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
+def analizar_mercados():
+    # Lista de activos o mercados que deseas consultar
+    simbolos = {
+        "EUR/USD": "EURUSD=X",
+        "Bitcoin": "BTC-USD",
+        "Oro": "GC=F",
+        "S&P 500": "^GSPC"
+    }
+    
+    resultados = []
+    
+    # Recopilar la información completa de cada tabla/activo
+    for nombre, ticker in simbolos.items():
+        try:
+            datos = yf.Ticker(ticker)
+            hist = datos.history(period="5d")
+            
+            if not hist.empty:
+                precio_actual = hist['Close'].iloc[-1]
+                precio_anterior = hist['Close'].iloc[-2]
+                cambio_porcentaje = ((precio_actual - precio_anterior) / precio_anterior) * 100
+                
+                # Definir una acción básica de ejemplo basada en el comportamiento
+                if cambio_porcentaje > 0:
+                    accion = "📈 COMPRAR (Alcista)"
+                else:
+                    accion = "📉 VENDER / ESPERAR (Bajista)"
+                
+                resultados.append({
+                    "nombre": nombre,
+                    "precio": round(precio_actual, 4),
+                    "cambio": round(cambio_porcentaje, 2),
+                    "accion": accion
+                })
+        except Exception as e:
+            print(f"Error al obtener datos de {nombre}: {e}")
 
+    return resultados
 
-async def generar_senial_y_enviar():
-    # 1. Verificar las credenciales
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        raise ValueError(
-            "Faltan TELEGRAM_TOKEN o CHAT_ID en los Secrets de GitHub."
-        )
+def generar_grafico_ejemplo(resultados):
+    # Crear un gráfico de ejemplo rápido para enviarlo con el mensaje
+    nombres = [r['nombre'] for r in resultados]
+    cambios = [r['cambio'] for r in resultados]
+    
+    plt.figure(figsize=(8, 4))
+    colores = ['green' if c >= 0 else 'red' for c in cambios]
+    plt.barh(nombres, cambios, color=colores)
+    plt.xlabel('Variación en %')
+    plt.title('Resumen de Mercados - Bot')
+    plt.axvline(0, color='grey', linestyle='--', linewidth=0.8)
+    plt.tight_layout()
+    
+    ruta_imagen = 'resumen_mercado.png'
+    plt.savefig(ruta_imagen)
+    plt.close()
+    return ruta_imagen
 
-    # 2. Descargar datos de EUR/USD
-    data = yf.download(
-        "EURUSD=X",
-        period="5d",
-        interval="15m",
-        progress=False,
-        auto_adjust=False
-    )
+async def enviar_reporte():
+    datos_mercado = analizar_mercados()
+    
+    if not datos_mercado:
+        print("No se pudieron obtener datos de los mercados.")
+        return
 
-    if data.empty or len(data) < 22:
-        raise ValueError(
-            "Yahoo Finance no devolvió suficientes datos de EUR/USD."
-        )
+    # Construir el texto con la información completa en formato de tabla/lista
+    mensaje = "📊 **REPORTE GENERAL DE MERCADOS Y ACCIONES** 📊\n\n"
+    
+    for item in datos_mercado:
+        mensaje += f"🔹 **{item['nombre']}**\n"
+        mensaje += f"   • Precio: `{item['precio']}`\n"
+        mensaje += f"   • Cambio: `{item['cambio']}%`\n"
+        mensaje += f"   • Acción sugerida: *{item['accion']}*\n\n"
 
-    # 3. Normalizar columnas multinivel de yfinance
-    if isinstance(data.columns, pd.MultiIndex):
-        for level in range(data.columns.nlevels):
-            column_names = data.columns.get_level_values(level)
+    # Generar la imagen de ejemplo
+    imagen_path = generar_grafico_ejemplo(datos_mercado)
 
-            if "Close" in column_names:
-                data.columns = column_names
-                break
+    # Crear botones interactivos para cada plataforma o mercado
+    teclado = [
+        [
+            InlineKeyboardButton("📈 Ver en TradingView", url="https://www.tradingview.com"),
+            InlineKeyboardButton("📉 Ver en MetaTrader", url="https://www.metatrader5.com")
+        ],
+        [
+            InlineKeyboardButton("🔄 Actualizar Datos", callback_data="actualizar")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(teclado)
 
-    # Comprobar que Close sea una serie, no un DataFrame
-    if "Close" not in data.columns:
-        raise ValueError(
-            "No se encontró la columna Close en los datos descargados."
-        )
-
-    close = data["Close"]
-
-    if isinstance(close, pd.DataFrame):
-        if close.shape[1] != 1:
-            raise ValueError(
-                "La columna Close contiene varios activos inesperados."
+    # Enviar la imagen junto con la información y los botones a Telegram
+    async with bot:
+        with open(imagen_path, 'rb') as foto:
+            await bot.send_photo(
+                chat_id=CHAT_ID,
+                photo=foto,
+                caption=mensaje,
+                parse_mode="Markdown",
+                reply_markup=reply_markup
             )
-        close = close.iloc[:, 0]
-
-    data["Close"] = pd.to_numeric(close, errors="coerce")
-    data = data.dropna(subset=["Close"])
-
-    if len(data) < 22:
-        raise ValueError("No hay suficientes precios válidos para las EMA.")
-
-    # 4. Calcular medias exponenciales
-    data["EMA_fast"] = data["Close"].ewm(
-        span=9, adjust=False
-    ).mean()
-
-    data["EMA_slow"] = data["Close"].ewm(
-        span=21, adjust=False
-    ).mean()
-
-    # Extraer valores individuales para evitar el error de Series
-    prev_fast = float(data["EMA_fast"].iloc[-2])
-    prev_slow = float(data["EMA_slow"].iloc[-2])
-    last_fast = float(data["EMA_fast"].iloc[-1])
-    last_slow = float(data["EMA_slow"].iloc[-1])
-
-    # 5. Detectar el cruce de medias
-    signal = "NEUTRAL / ESPERAR"
-    color = "gray"
-
-    if prev_fast <= prev_slow and last_fast > last_slow:
-        signal = "¡COMPRA (BUY) EUR/USD!"
-        color = "green"
-
-    elif prev_fast >= prev_slow and last_fast < last_slow:
-        signal = "¡VENTA (SELL) EUR/USD!"
-        color = "red"
-
-    # 6. Crear gráfico
-    fig, ax = plt.subplots(figsize=(10, 5))
-
-    recent = data.iloc[-30:]
-
-    ax.plot(
-        recent.index, recent["Close"],
-        label="Precio EUR/USD", color="black"
-    )
-    ax.plot(
-        recent.index, recent["EMA_fast"],
-        label="EMA 9", color="blue"
-    )
-    ax.plot(
-        recent.index, recent["EMA_slow"],
-        label="EMA 21", color="orange"
-    )
-
-    ax.set_title(
-        f"Señal de Trading: {signal}",
-        fontsize=14,
-        color=color,
-        fontweight="bold"
-    )
-    ax.set_xlabel("Hora")
-    ax.set_ylabel("Precio")
-    ax.legend()
-    ax.grid(True)
-
-    image_path = "eurusd_signal.png"
-
-    try:
-        fig.savefig(image_path, bbox_inches="tight")
-    finally:
-        plt.close(fig)
-
-    # 7. Enviar análisis a Telegram
-    precio_actual = float(data["Close"].iloc[-1])
-
-    mensaje = (
-        f"📊 **ANÁLISIS EUR/USD**\n"
-        f"**Acción recomendada:** {signal}\n"
-        f"**Precio Actual:** {precio_actual:.5f}\n\n"
-        f"EMA 9: {last_fast:.5f}\n"
-        f"EMA 21: {last_slow:.5f}\n\n"
-        f"⚠️ *Gestiona tu riesgo correctamente.*"
-    )
-
-    try:
-        async with Bot(token=TELEGRAM_TOKEN) as bot:
-            with open(image_path, "rb") as photo:
-                await bot.send_photo(
-                    chat_id=CHAT_ID,
-                    photo=photo,
-                    caption=mensaje,
-                    parse_mode="Markdown"
-                )
-    finally:
-        if os.path.exists(image_path):
-            os.remove(image_path)
-
 
 if __name__ == "__main__":
-    asyncio.run(generar_senial_y_enviar())
+    import asyncio
+    asyncio.run(enviar_reporte())
