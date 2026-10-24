@@ -19,7 +19,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance matplotlib pandas requests
+          pip install yfinance matplotlib pandas requests python-telegram-bot
 
       - name: Run script
         run: |
