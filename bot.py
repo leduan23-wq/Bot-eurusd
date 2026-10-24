@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import threading
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -17,11 +18,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Credenciales y variables del entorno de Render
+# Credenciales y variables de entorno
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
-# Render asigna automáticamente la URL externa de tu servicio web en esta variable
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 # Inicializar Google Gemini
@@ -68,7 +68,7 @@ async def start(update: Update, context):
     user_name = update.effective_user.first_name
     bienvenida = (
         f"¡Hola, {user_name}! 🤖📊\n\n"
-        "Tu bot de trading en **Web Service** ya está conectado con **Gemini IA**.\n"
+        "Tu bot de trading ya está activo con **Gemini IA**.\n"
         "Envía un activo (ej: `BTC-USD`) o una captura de pantalla para calcular Entrada, TP y SL."
     )
     await update.message.reply_text(bienvenida, parse_mode="Markdown")
@@ -113,38 +113,39 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, respond
 telegram_app.add_handler(MessageHandler(filters.PHOTO, analizar_imagen_ia))
 
 # ---------------------------------------------------------
-# RUTAS DEL SERVIDOR WEB (FLASK) PARA RENDER
+# CONFIGURACIÓN DEL BUCLE Y WEBHOOK
+# ---------------------------------------------------------
+loop = asyncio.new_event_loop()
+
+def run_async_loop(l):
+    asyncio.set_event_loop(l)
+    l.run_forever()
+
+# Iniciar el bucle de asyncio en un hilo separado de fondo
+threading.Thread(target=run_async_loop, args=(loop,), daemon=True).start()
+
+async def setup_webhook():
+    await telegram_app.initialize()
+    webhook_endpoint = f"{WEBHOOK_URL}/{TELEGRAM_TOKEN}"
+    await telegram_app.bot.set_webhook(url=webhook_endpoint)
+    logger.info(f"Webhook configurado en: {webhook_endpoint}")
+
+# Ejecutar la configuración inicial del webhook de forma segura en el bucle
+asyncio.run_coroutine_threadsafe(setup_webhook(), loop)
+
+# ---------------------------------------------------------
+# RUTAS DEL SERVIDOR WEB (FLASK)
 # ---------------------------------------------------------
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
-    """Recibe las peticiones de Telegram de forma asíncrona"""
     json_update = request.get_json(force=True)
     update = Update.de_json(json_update, telegram_app.bot)
-    
-    # Ejecutar el update en el loop de eventos de asyncio
     asyncio.run_coroutine_threadsafe(telegram_app.process_update(update), loop)
     return "OK", 200
 
 @app.route("/")
 def index():
-    return "Bot de Trading con IA Activo y Escuchando Puertos", 200
-
-# ---------------------------------------------------------
-# INICIO DE LA APLICACIÓN
-# ---------------------------------------------------------
-loop = asyncio.new_event_loop()
-
-async def setup_webhook():
-    asyncio.set_event_loop(loop)
-    await telegram_app.initialize()
-    # Configurar el Webhook en los servidores de Telegram usando la URL de Render
-    webhook_endpoint = f"{WEBHOOK_URL}/{TELEGRAM_TOKEN}"
-    await telegram_app.bot.set_webhook(url=webhook_endpoint)
-    logger.info(f"Webhook configurado en: {webhook_endpoint}")
+    return "Bot de Trading con IA Activo", 200
 
 if __name__ == "__main__":
-    # Configurar el bot antes de arrancar Flask
-    loop.run_until_complete(setup_webhook())
-    
-    # Arrancar el servidor Flask en el puerto asignado por Render (satisface 'No open ports detected')
     app.run(host="0.0.0.0", port=PORT)
