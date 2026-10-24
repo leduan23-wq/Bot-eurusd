@@ -1,120 +1,75 @@
-import os
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import yfinance as yf
 import matplotlib.pyplot as plt
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+import matplotlib.patches as patches
+import numpy as np
 
-# --- MINI SERVIDOR HTTP PARA RENDER (Background / Web Service compatible) ---
-class SimpleHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot de Trading con graficos Activo 24/7!")
-
-def run_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
-    server.serve_forever()
-
-threading.Thread(target=run_server, daemon=True).start()
-# --------------------------------------------------------------------------
-
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-
-# Función para generar la gráfica con el estilo de niveles (Alto, Bajo, 50%)
 def generar_grafico_estilo_trading(df, ticker, accion):
     plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.axis('off')
     
-    precios = df['Close'].values
-    altos = df['High'].values
-    bajos = df['Low'].values
+    # Coordenadas del lienzo esquemático
+    y_min, y_max = 0, 100
+    y_mid = 50
     
-    max_val = max(altos)
-    min_val = min(bajos)
-    mid_val = (max_val + min_val) / 2
+    # 1. Caja principal del rango (Líneas blancas brillantes para ALTO y BAJO)
+    ax.plot([2, 12], [y_max, y_max], color='white', linewidth=2)  # Línea superior (ALTO)
+    ax.plot([2, 12], [y_min, y_min], color='white', linewidth=2)  # Línea inferior (BAJO)
+    ax.plot([12, 12], [y_min, y_max], color='white', linewidth=2) # Cierre derecho del rango
     
-    # Líneas de referencia principales (Estilo tus imágenes de referencia)
-    ax.axhline(max_val, color='white', linestyle='-', linewidth=1.5, label='ALTO (Resistencia)')
-    ax.axhline(min_val, color='white', linestyle='-', linewidth=1.5, label='BAJO (Soporte)')
-    ax.axhline(mid_val, color='silver', linestyle='--', linewidth=1.2, alpha=0.8, label='50% (Equilibrio)')
+    # 2. Bloque "1D" a la izquierda (Caja blanca vertical sólida)
+    caja_1d = patches.Rectangle((0.5, y_min), 1.2, y_max - y_min, facecolor='white', edgecolor='none')
+    ax.add_patch(caja_1d)
+    ax.text(1.1, y_mid, "1D", color='black', fontsize=13, fontweight='bold', rotation=90, va='center', ha='center')
     
-    # Graficar la línea de precios
-    ax.plot(range(len(precios)), precios, color='cyan', linewidth=2.5, label='Precio')
+    # Conector entre la caja 1D y el rango
+    ax.plot([1.7, 2], [y_mid, y_mid], color='white', linewidth=1.5)
     
-    # Zona sombreada de proyección según la acción sugerida
+    # 3. Línea punteada del 50% (Equilibrio)
+    ax.axhline(y_mid, color='white', linestyle='--', linewidth=1.2, alpha=0.9)
+    ax.text(12.3, y_mid, "50%", color='white', fontsize=11, fontweight='bold', va='center')
+    
+    # 4. Zonas de color sólido (Rojo arriba / Verde abajo o viceversa según la acción)
     if "COMPRAR" in accion:
-        ax.fill_between(range(len(precios)), min_val, mid_val, color='green', alpha=0.25, label='Zona Alcista')
+        zona_verde = patches.Rectangle((6, y_min), 6, y_mid - y_min, facecolor='green', alpha=0.35, edgecolor='none')
+        zona_roja = patches.Rectangle((6, y_mid), 6, y_max - y_mid, facecolor='darkred', alpha=0.45, edgecolor='none')
+        ax.add_patch(zona_verde)
+        ax.add_patch(zona_roja)
     else:
-        ax.fill_between(range(len(precios)), mid_val, max_val, color='red', alpha=0.25, label='Zona Bajista')
+        zona_verde = patches.Rectangle((6, y_mid), 6, y_max - y_mid, facecolor='green', alpha=0.35, edgecolor='none')
+        zona_roja = patches.Rectangle((6, y_min), 6, y_mid - y_min, facecolor='darkred', alpha=0.45, edgecolor='none')
+        ax.add_patch(zona_verde)
+        ax.add_patch(zona_roja)
+
+    # 5. Dibujar velas esquemáticas dentro del gráfico para simular la acción del precio
+    np.random.seed(42)
+    num_velas = 12
+    x_vals = np.linspace(2.5, 11.5, num_velas)
+    
+    if "COMPRAR" in accion:
+        tendencia = np.linspace(35, 25, num_velas) + np.sin(np.linspace(0, 3, num_velas)) * 8
+    else:
+        tendencia = np.linspace(65, 75, num_velas) + np.cos(np.linspace(0, 3, num_velas)) * 8
         
-    ax.set_title(f"Estructura de Mercado: {ticker}", fontsize=13, color='white', pad=10)
-    ax.legend(loc='upper left', frameon=False, fontsize=9)
-    ax.grid(color='gray', linestyle=':', alpha=0.3)
+    for i, x in enumerate(x_vals):
+        base_y = tendencia[i]
+        # Mecha de la vela
+        ax.plot([x, x], [base_y - 7, base_y + 7], color='white', linewidth=1)
+        # Cuerpo de la vela
+        cuerpo = patches.Rectangle((x - 0.3, base_y - 3.5), 0.6, 7, facecolor='white', edgecolor='white')
+        ax.add_patch(cuerpo)
+
+    # 6. Etiquetas de texto institucionales
+    ax.text(12.3, y_max, "ALTO", color='white', fontsize=12, fontweight='bold', va='center')
+    ax.text(12.3, y_min, "BAJO", color='white', fontsize=12, fontweight='bold', va='center')
+    
+    # Título limpio superior
+    ax.set_title(f"Estructura Institucional ({ticker})", fontsize=13, color='cyan', pad=15, fontweight='bold')
+    
+    ax.set_xlim(-0.2, 14)
+    ax.set_ylim(-10, 110)
     
     plt.tight_layout()
     ruta_imagen = 'analisis_tecnico.png'
     plt.savefig(ruta_imagen, dpi=300, facecolor=fig.get_facecolor())
     plt.close()
     return ruta_imagen
-
-# Comando /start
-async def start(command_update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await command_update.message.reply_text(
-        "¡Hola! Soy tu bot de trading profesional 📊.\n"
-        "Escribe el símbolo de cualquier moneda (ejemplo: `BTC-USD`, `EURUSD=X`, `ETH-USD`) y te enviaré el análisis con su gráfica de niveles al instante."
-    )
-
-# Función que responde a tus peticiones con texto y la imagen técnica
-async def responder_mercado(message_update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto_usuario = message_update.message.text.strip().upper()
-    
-    await message_update.message.reply_text(f"🔍 Analizando estructura y niveles para `{texto_usuario}`...")
-    
-    try:
-        datos = yf.Ticker(texto_usuario)
-        hist = datos.history(period="5d") # Tomamos los últimos días para ver rangos
-        
-        if not hist.empty:
-            precio_actual = hist['Close'].iloc[-1]
-            precio_anterior = hist['Close'].iloc[-2]
-            cambio = ((precio_actual - precio_anterior) / precio_anterior) * 100
-            
-            accion = "📈 COMPRAR (Alcista)" if cambio > 0 else "📉 VENDER / ESPERAR (Bajista)"
-            
-            # Generar la imagen personalizada con los niveles altos, bajos y 50%
-            imagen_path = generar_grafico_estilo_trading(hist, texto_usuario, accion)
-            
-            respuesta = (
-                f"📊 **Reporte Técnico para {texto_usuario}**\n\n"
-                f"• Precio actual: `{round(precio_actual, 4)}`\n"
-                f"• Cambio: `{round(cambio, 2)}%`\n"
-                f"• Sugerencia: *{accion}*"
-            )
-            
-            # Enviar la foto con la gráfica generada y el texto explicativo
-            with open(imagen_path, 'rb') as foto:
-                await message_update.message.reply_photo(
-                    photo=foto,
-                    caption=respuesta,
-                    parse_mode="Markdown"
-                )
-        else:
-            await message_update.message.reply_text("❌ No encontré información para ese símbolo. Prueba con otro (ej: `BTC-USD`).")
-            
-    except Exception as e:
-        await message_update.message.reply_text(f"⚠️ Ocurrió un error al procesar el activo: {e}")
-
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), responder_mercado))
-
-    print("🤖 Bot interactivo con gráficos técnicos iniciado...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
