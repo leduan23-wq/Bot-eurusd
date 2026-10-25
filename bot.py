@@ -93,7 +93,6 @@ def generar_grafico_posicion(simbolo, entrada, tp, sl):
 async def start(update: Update, context):
     user_name = update.effective_user.first_name if update.effective_user else "Trader"
     
-    # Organizar los botones en filas limpias de 2 columnas
     keyboard = [
         [InlineKeyboardButton("💱 EURUSD", callback_data="asset_EURUSD"), InlineKeyboardButton("💱 USDJPY", callback_data="asset_USDJPY")],
         [InlineKeyboardButton("🪙 BTCUSD", callback_data="asset_BTCUSD"), InlineKeyboardButton("🪙 BTCUSDT", callback_data="asset_BTCUSDT")],
@@ -105,7 +104,7 @@ async def start(update: Update, context):
     
     bienvenida = (
         f"¡Hola, {user_name}! 🤖📊\n\n"
-        "Selecciona abajo el activo que deseas analizar en tu **TradingView**:"
+        "Selecciona abajo el activo que deseas analizar en tu TradingView:"
     )
     
     if update.message:
@@ -124,7 +123,7 @@ async def asset_chosen(update: Update, context):
     
     await query.message.edit_text(
         f"✅ Has seleccionado: **{asset}**\n\n"
-        "📸 **Envía ahora la captura de pantalla de tu TradingView** para este activo y la IA calculará los niveles exactos en tiempo real.",
+        "📸 **Envía ahora la captura de pantalla de tu TradingView** para este activo y la IA aplicará la metodología profesional de análisis técnico para calcular los niveles exactos.",
         parse_mode="Markdown"
     )
     return ASK_PHOTO
@@ -132,18 +131,23 @@ async def asset_chosen(update: Update, context):
 async def receive_photo_and_analyze(update: Update, context):
     try:
         asset = context.user_data.get('selected_asset', 'BTC-USD')
-        await update.message.reply_text(f"🤖 Analizando la captura de pantalla para **{asset}**, cruzando precios reales y calculando niveles ICT...")
+        await update.message.reply_text(f"🤖 Analizando la captura de pantalla para **{asset}** aplicando soportes, resistencias, confluencias y gestión de riesgo...")
         
         foto_archivo = await update.message.photo[-1].get_file()
         foto_bytes = await foto_archivo.download_as_bytearray()
         
         imagen_part = {'mime_type': 'image/jpeg', 'data': bytes(foto_bytes)}
         
+        # PROMPT ENRIQUECIDO CON LA INFORMACIÓN Y ESTRATEGIA DEL TUTORIAL
         prompt_vision = (
-            f"Actúa como un trader institucional experto en metodología ICT. "
+            f"Actúa como un trader institucional experto en Price Action, Metodología ICT y análisis técnico avanzado. "
             f"El activo seleccionado es: '{asset}'. "
-            f"Analiza la captura de pantalla adjunta de TradingView basándote en el precio real actual visible en la imagen. "
-            f"Calcula con precisión los niveles óptimos de Entrada, TP y SL adaptados a ese gráfico. "
+            f"Analiza la captura de pantalla adjunta de TradingView aplicando los siguientes criterios clave:\n"
+            f"1. **Soportes y Resistencias (Pisos y Techos):** Identifica zonas clave donde el precio haya rebotado múltiples veces.\n"
+            f"2. **Tendencia y Estructura:** Determina la dirección (alcista con máximos/mínimos crecientes o bajista con máximos/mínimos decrecientes).\n"
+            f"3. **Confirmaciones (Velas Envolventes / Mechas):** Busca patrones de reacción en las zonas operativas.\n"
+            f"4. **Gestión de Riesgo y R/R:** Asegura que la relación beneficio-riesgo sea profesional (mínimo 1:2, donde el Take Profit sea al menos el doble de la distancia del Stop Loss).\n"
+            f"Basándote estrictamente en el precio real actual visible en la imagen, calcula con precisión los niveles óptimos.\n"
             f"Debes incluir obligatoriamente al final de tu respuesta los valores numéricos exactos en este formato estricto:\n"
             f"ENTRADA: [número]\n"
             f"TP: [número]\n"
@@ -153,7 +157,7 @@ async def receive_photo_and_analyze(update: Update, context):
         respuesta = model.generate_content([prompt_vision, imagen_part], safety_settings=safety_settings)
         texto_respuesta = respuesta.text
         
-        # Valores de respaldo predeterminados por si acaso
+        # Valores de respaldo predeterminados
         entrada, tp, sl = 80750.00, 80900.00, 80600.00
         
         match_ent = re.search(r"ENTRADA:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
@@ -174,16 +178,16 @@ async def receive_photo_and_analyze(update: Update, context):
                 caption=f"Gráfico ICT generado para {asset}"
             )
             
-        # Enviar análisis detallado en texto plano (sin parse_mode para evitar errores de entidades)
+        # Enviar análisis detallado en texto plano
         await update.message.reply_text(
-            f"📋 Análisis y Niveles Exactos para TradingView:\n\n{texto_respuesta}"
+            f"📋 Análisis Técnico y Niveles Exactos:\n\n{texto_respuesta}"
         )
         
-        # Volver a mostrar el menú de botones para otro análisis
+        # Volver a mostrar el menú de botones
         await start(update, context)
         
     except Exception as e:
-        logger.error(f"Error procesando análisis con botones: {e}", exc_info=True)
+        logger.error(f"Error procesando análisis con la nueva información: {e}", exc_info=True)
         await update.message.reply_text(f"Ocurrió un error procesando tu solicitud: {str(e)}")
         
     return ConversationHandler.END
@@ -237,7 +241,7 @@ def webhook():
 
 @app.route("/")
 def index():
-    return "Bot de Trading con Botones Interactivos Activo", 200
+    return "Bot de Trading con Estrategia Integrada Activo", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
