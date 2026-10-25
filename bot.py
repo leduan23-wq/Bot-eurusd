@@ -8,7 +8,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from flask import Flask, request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -79,7 +79,7 @@ def generar_grafico_posicion(simbolo, entrada, tp, sl):
     ax.tick_params(colors='white')
     for spine in ax.spines.values():
         spine.set_color('#363c4e')
-    ax.set_title(f'Niveles Óptimos ICT ({simbolo.upper()})', color='white', fontsize=12, pad=10)
+    ax.set_title(f'Niveles Óptimos El Sensei Trading ({simbolo.upper()})', color='white', fontsize=12, pad=10)
     ax.legend(facecolor='#131722', edgecolor='#363c4e', labelcolor='white', loc='upper left')
     
     ruta_imagen = 'analisis_ia.png'
@@ -104,144 +104,4 @@ async def start(update: Update, context):
     
     bienvenida = (
         f"¡Hola, {user_name}! 🤖📊\n\n"
-        "Selecciona abajo el activo que deseas analizar en tu TradingView:"
-    )
-    
-    if update.message:
-        await update.message.reply_text(bienvenida, reply_markup=reply_markup, parse_mode="Markdown")
-    elif update.callback_query:
-        await update.callback_query.message.edit_text(bienvenida, reply_markup=reply_markup, parse_mode="Markdown")
-        
-    return ConversationHandler.END
-
-async def asset_chosen(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    
-    asset = query.data.replace("asset_", "")
-    context.user_data['selected_asset'] = asset
-    
-    await query.message.edit_text(
-        f"✅ Has seleccionado: **{asset}**\n\n"
-        "📸 **Envía ahora la captura de pantalla de tu TradingView** para este activo y la IA aplicará la metodología profesional de análisis técnico para calcular los niveles exactos.",
-        parse_mode="Markdown"
-    )
-    return ASK_PHOTO
-
-async def receive_photo_and_analyze(update: Update, context):
-    try:
-        asset = context.user_data.get('selected_asset', 'BTC-USD')
-        await update.message.reply_text(f"🤖 Analizando la captura de pantalla para **{asset}** aplicando soportes, resistencias, confluencias y gestión de riesgo...")
-        
-        foto_archivo = await update.message.photo[-1].get_file()
-        foto_bytes = await foto_archivo.download_as_bytearray()
-        
-        imagen_part = {'mime_type': 'image/jpeg', 'data': bytes(foto_bytes)}
-        
-        # PROMPT ENRIQUECIDO CON LA INFORMACIÓN Y ESTRATEGIA DEL TUTORIAL
-        prompt_vision = (
-            f"Actúa como un trader institucional experto en Price Action, Metodología ICT y análisis técnico avanzado. "
-            f"El activo seleccionado es: '{asset}'. "
-            f"Analiza la captura de pantalla adjunta de TradingView aplicando los siguientes criterios clave:\n"
-            f"1. **Soportes y Resistencias (Pisos y Techos):** Identifica zonas clave donde el precio haya rebotado múltiples veces.\n"
-            f"2. **Tendencia y Estructura:** Determina la dirección (alcista con máximos/mínimos crecientes o bajista con máximos/mínimos decrecientes).\n"
-            f"3. **Confirmaciones (Velas Envolventes / Mechas):** Busca patrones de reacción en las zonas operativas.\n"
-            f"4. **Gestión de Riesgo y R/R:** Asegura que la relación beneficio-riesgo sea profesional (mínimo 1:2, donde el Take Profit sea al menos el doble de la distancia del Stop Loss).\n"
-            f"Basándote estrictamente en el precio real actual visible en la imagen, calcula con precisión los niveles óptimos.\n"
-            f"Debes incluir obligatoriamente al final de tu respuesta los valores numéricos exactos en este formato estricto:\n"
-            f"ENTRADA: [número]\n"
-            f"TP: [número]\n"
-            f"SL: [número]"
-        )
-        
-        respuesta = model.generate_content([prompt_vision, imagen_part], safety_settings=safety_settings)
-        texto_respuesta = respuesta.text
-        
-        # Valores de respaldo predeterminados
-        entrada, tp, sl = 80750.00, 80900.00, 80600.00
-        
-        match_ent = re.search(r"ENTRADA:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
-        match_tp = re.search(r"TP:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
-        match_sl = re.search(r"SL:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
-        
-        if match_ent: entrada = float(match_ent.group(1))
-        if match_tp: tp = float(match_tp.group(1))
-        if match_sl: sl = float(match_sl.group(1))
-        
-        # Generar gráfico dinámico
-        ruta_grafico = generar_grafico_posicion(asset, entrada, tp, sl)
-        
-        # Enviar foto del gráfico generado
-        with open(ruta_grafico, 'rb') as photo:
-            await update.message.reply_photo(
-                photo=photo,
-                caption=f"Gráfico ICT generado para {asset}"
-            )
-            
-        # Enviar análisis detallado en texto plano
-        await update.message.reply_text(
-            f"📋 Análisis Técnico y Niveles Exactos:\n\n{texto_respuesta}"
-        )
-        
-        # Volver a mostrar el menú de botones
-        await start(update, context)
-        
-    except Exception as e:
-        logger.error(f"Error procesando análisis con la nueva información: {e}", exc_info=True)
-        await update.message.reply_text(f"Ocurrió un error procesando tu solicitud: {str(e)}")
-        
-    return ConversationHandler.END
-
-async def cancel(update: Update, context):
-    await update.message.reply_text("Operación cancelada. Escribe /start para volver al menú.")
-    return ConversationHandler.END
-
-# Configuración del ConversationHandler
-conv_handler = ConversationHandler(
-    entry_points=[CallbackQueryHandler(asset_chosen, pattern="^asset_")],
-    states={
-        ASK_PHOTO: [MessageHandler(filters.PHOTO, receive_photo_and_analyze)],
-    },
-    fallbacks=[CommandHandler('cancel', cancel)],
-)
-
-# Registrar manejadores
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(conv_handler)
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
-
-# ---------------------------------------------------------
-# CONFIGURACIÓN DEL BUCLE Y WEBHOOK
-# ---------------------------------------------------------
-loop = asyncio.new_event_loop()
-
-def run_async_loop(l):
-    asyncio.set_event_loop(l)
-    l.run_forever()
-
-threading.Thread(target=run_async_loop, args=(loop,), daemon=True).start()
-
-async def setup_webhook():
-    await telegram_app.initialize()
-    webhook_endpoint = f"{WEBHOOK_URL}/{TELEGRAM_TOKEN}"
-    await telegram_app.bot.set_webhook(url=webhook_endpoint)
-    logger.info(f"Webhook configurado en: {webhook_endpoint}")
-
-asyncio.run_coroutine_threadsafe(setup_webhook(), loop)
-
-# ---------------------------------------------------------
-# RUTAS DEL WEBHOOK (FLASK)
-# ---------------------------------------------------------
-@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
-def webhook():
-    json_update = request.get_json(force=True)
-    update = Update.de_json(json_update, telegram_app.bot)
-    asyncio.run_coroutine_threadsafe(telegram_app.process_update(update), loop)
-    return "OK", 200
-
-@app.route("/")
-def index():
-    return "Bot de Trading con Estrategia Integrada Activo", 200
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT)
+        "Bienvenido a tu asistente de trading
