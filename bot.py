@@ -88,10 +88,10 @@ def generar_grafico_posicion(simbolo, entrada, tp, sl):
     return ruta_imagen
 
 # ---------------------------------------------------------
-# MENÚ DE BOTONES ESTILO TIENDA CON TODOS LOS ACTIVOS
+# MENÚ DE BOTONES INTERACTIVOS CON TODOS LOS ACTIVOS
 # ---------------------------------------------------------
 async def start(update: Update, context):
-    user_name = update.effective_user.first_name
+    user_name = update.effective_user.first_name if update.effective_user else "Trader"
     
     # Organizar los botones en filas limpias de 2 columnas
     keyboard = [
@@ -119,7 +119,6 @@ async def asset_chosen(update: Update, context):
     query = update.callback_query
     await query.answer()
     
-    # Extraer el activo seleccionado del callback_data (ej. "asset_EURUSD" -> "EURUSD")
     asset = query.data.replace("asset_", "")
     context.user_data['selected_asset'] = asset
     
@@ -172,14 +171,12 @@ async def receive_photo_and_analyze(update: Update, context):
         with open(ruta_grafico, 'rb') as photo:
             await update.message.reply_photo(
                 photo=photo,
-                caption=f"📈 **Gráfico ICT generado para {asset}**",
-                parse_mode="Markdown"
+                caption=f"Gráfico ICT generado para {asset}"
             )
             
-        # Enviar análisis detallado en un mensaje separado (evitando límite de Telegram)
+        # Enviar análisis detallado en texto plano (sin parse_mode para evitar errores de entidades)
         await update.message.reply_text(
-            f"📋 **Análisis y Niveles Exactos para TradingView:**\n\n{texto_respuesta}",
-            parse_mode="Markdown"
+            f"📋 Análisis y Niveles Exactos para TradingView:\n\n{texto_respuesta}"
         )
         
         # Volver a mostrar el menú de botones para otro análisis
@@ -207,7 +204,6 @@ conv_handler = ConversationHandler(
 # Registrar manejadores
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(conv_handler)
-# Manejador general de texto por si escriben algo suelto
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
 
 # ---------------------------------------------------------
