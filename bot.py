@@ -26,7 +26,7 @@ GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 
-# Inicializar Google Gemini con el modelo correcto
+# Inicializar Google Gemini
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3.8-flash')
@@ -78,7 +78,7 @@ def generar_grafico_posicion(simbolo, entrada, tp, sl):
     return ruta_imagen
 
 # ---------------------------------------------------------
-# MANEJADORES DE TELEGRAM (Generación Autónoma por Texto)
+# MANEJADORES DE TELEGRAM
 # ---------------------------------------------------------
 async def start(update: Update, context):
     user_name = update.effective_user.first_name
@@ -103,7 +103,6 @@ async def responder_con_ia(update: Update, context):
             f"SL: [número]"
         )
         
-        # Generar contenido aplicando los filtros de seguridad relajados
         respuesta = model.generate_content(prompt, safety_settings=safety_settings)
         texto_respuesta = respuesta.text
         
@@ -118,18 +117,25 @@ async def responder_con_ia(update: Update, context):
         if match_tp: tp = float(match_tp.group(1))
         if match_sl: sl = float(match_sl.group(1))
         
-        # Generar la imagen automáticamente basada en el texto del usuario
+        # Generar la imagen del gráfico
         ruta_grafico = generar_grafico_posicion(texto, entrada, tp, sl)
         
+        # 1. Enviar la foto con un título corto (para evitar el límite de Telegram)
         with open(ruta_grafico, 'rb') as photo:
             await update.message.reply_photo(
                 photo=photo,
-                caption=f"📈 **Análisis Autónomo ICT:**\n\n{texto_respuesta}",
+                caption=f"📈 **Gráfico ICT generado para: {texto.upper()}**",
                 parse_mode="Markdown"
             )
             
+        # 2. Enviar el análisis completo en un mensaje de texto separado
+        await update.message.reply_text(
+            f"📋 **Análisis Técnico Detallado:**\n\n{texto_respuesta}",
+            parse_mode="Markdown"
+        )
+            
     except Exception as e:
-        logger.error(f"Error detallado generando análisis autónomo: {e}", exc_info=True)
+        logger.error(f"Error generando análisis autónomo: {e}", exc_info=True)
         await update.message.reply_text(f"Ocurrió un error procesando tu solicitud: {str(e)}")
 
 async def analizar_imagen_ia(update: Update, context):
@@ -161,9 +167,14 @@ async def analizar_imagen_ia(update: Update, context):
         with open(ruta_grafico, 'rb') as photo:
             await update.message.reply_photo(
                 photo=photo,
-                caption=f"📈 **Análisis de Captura:**\n\n{texto_respuesta}",
+                caption="📈 **Gráfico Analizado por IA**",
                 parse_mode="Markdown"
             )
+            
+        await update.message.reply_text(
+            f"📋 **Análisis Detallado de la Captura:**\n\n{texto_respuesta}",
+            parse_mode="Markdown"
+        )
     except Exception as e:
         logger.error(f"Error procesando imagen: {e}", exc_info=True)
         await update.message.reply_text("No se pudo procesar la imagen.")
