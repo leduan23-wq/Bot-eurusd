@@ -8,8 +8,15 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from flask import Flask, request
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ConversationHandler,
+    filters
+)
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
@@ -43,8 +50,11 @@ safety_settings = {
 app = Flask(__name__)
 telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
 
+# Estados del flujo interactivo
+ASK_DETAILS, ASK_PHOTO = range(2)
+
 # ---------------------------------------------------------
-# FUNCIÓN DE GRÁFICO DINÁMICO (Escalado al precio real)
+# FUNCIÓN DE GRÁFICO DINÁMICO
 # ---------------------------------------------------------
 def generar_grafico_posicion(simbolo, entrada, tp, sl):
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -57,7 +67,7 @@ def generar_grafico_posicion(simbolo, entrada, tp, sl):
     
     ax.plot(x, precios, color='#2962FF', linewidth=2, label='Estructura')
     
-    # Líneas clave de gestión de riesgo ajustadas al precio real
+    # Líneas clave ajustadas al precio real
     ax.axhline(y=tp, color='#26a69a', linestyle='--', linewidth=1.8, label=f'TP: {tp}')
     ax.axhline(y=entrada, color='#2962FF', linestyle='-', linewidth=1.8, label=f'Entrada: {entrada}')
     ax.axhline(y=sl, color='#ef5350', linestyle='--', linewidth=1.8, label=f'SL: {sl}')
@@ -78,85 +88,68 @@ def generar_grafico_posicion(simbolo, entrada, tp, sl):
     return ruta_imagen
 
 # ---------------------------------------------------------
-# MANEJADORES DE TELEGRAM
+# MANEJADORES DEL FLUJO INTERACTIVO (CONVERSATION HANDLER)
 # ---------------------------------------------------------
 async def start(update: Update, context):
     user_name = update.effective_user.first_name
+    keyboard = [[InlineKeyboardButton("📊 Analizar Gráfico TradingView", callback_data="start_analysis")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     bienvenida = (
         f"¡Hola, {user_name}! 🤖📊\n\n"
-        "Tu bot autónomo con **Gemini IA** está calibrado para usar precios reales de mercado.\n"
-        "Escribe el activo (ej: `BTC-USD`, `EURUSD`) y te generará los niveles exactos para tu TradingView."
+        "Tu bot autónomo con **Gemini IA** está listo.\n"
+        "Presiona el botón de abajo para iniciar el análisis interactivo de tu captura de TradingView."
     )
-    await update.message.reply_text(bienvenida, parse_mode="Markdown")
+    await update.message.reply_text(bienvenida, reply_markup=reply_markup, parse_mode="Markdown")
+    return ConversationHandler.END
 
-async def responder_con_ia(update: Update, context):
-    texto = update.message.text
+async def button_handler(update: Update, context):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "start_analysis":
+        await query.message.reply_text(
+            "1️⃣ **Paso 1:** Por favor, ingresa los **datos esenciales** antes de enviar la captura "
+            "(Ejemplo: `BTC-USD, 1m, Busco Compra en Order Block`):",
+            parse_mode="Markdown"
+        )
+        return ASK_DETAILS
+
+async def receive_details(update: Update, context):
+    context.user_data['trade_details'] = update.message.text
+    await update.message.reply_text(
+        "2️⃣ **Paso 2:** ¡Datos esenciales guardados!\n"
+        "Ahora **envía la captura de pantalla de tu TradingView** para que la IA realice los cálculos finales.",
+        parse_mode="Markdown"
+    )
+    return ASK_PHOTO
+
+async def receive_photo_and_analyze(update: Update, context):
     try:
-        await update.message.reply_text("🤖 Consultando precio actual de mercado y calculando niveles ICT...")
+        details = context.user_data.get('trade_details', 'No especificado')
+        await update.message.reply_text("🤖 Analizando la captura de pantalla, cruzando tus datos esenciales y calculando niveles ICT con precios reales...")
         
-        # PROMPT MEJORADO: Exige explícitamente basarse en el precio real actual
-        prompt = (
+        foto_archivo = await update.message.photo[-1].get_file()
+        foto_bytes = await foto_archivo.download_as_bytearray()
+        
+        imagen_part = {'mime_type': 'image/jpeg', 'data': bytes(foto_bytes)}
+        
+        prompt_vision = (
             f"Actúa como un trader institucional experto en metodología ICT. "
-            f"Para el activo solicitado: '{texto}', debes basarte **estrictamente en el precio real actual de mercado de hoy** "
-            f"(por ejemplo, si el activo cotiza actualmente en 80,000, tus cálculos deben partir de ese precio real y actual). "
-            f"No inventes precios desactualizados. Calcula un escenario profesional y "
-            f"debes incluir obligatoriamente al final de tu respuesta los valores numéricos exactos en este formato estricto:\n"
+            f"El usuario proporcionó estos datos esenciales previos: '{details}'. "
+            f"Analiza la captura de pantalla adjunta de TradingView basándote en el precio real visible y los datos indicados. "
+            f"Calcula con precisión los niveles óptimos. "
+            f"Debes incluir obligatoriamente al final de tu respuesta los valores numéricos exactos en este formato estricto:\n"
             f"ENTRADA: [número]\n"
             f"TP: [número]\n"
             f"SL: [número]"
         )
         
-        respuesta = model.generate_content(prompt, safety_settings=safety_settings)
-        texto_respuesta = respuesta.text
-        
-        # Valores por defecto de respaldo actualizados al rango de 80k
-        entrada, tp, sl = 80750.00, 80900.00, 80600.00
-        
-        match_ent = re.search(r"ENTRADA:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
-        match_tp = re.search(r"TP:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
-        match_sl = re.search(r"SL:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
-        
-        if match_ent: entrada = float(match_ent.group(1))
-        if match_tp: tp = float(match_tp.group(1))
-        if match_sl: sl = float(match_sl.group(1))
-        
-        # Generar el gráfico con los precios reales
-        ruta_grafico = generar_grafico_posicion(texto, entrada, tp, sl)
-        
-        # Enviar foto con título corto
-        with open(ruta_grafico, 'rb') as photo:
-            await update.message.reply_photo(
-                photo=photo,
-                caption=f"📈 **Niveles ICT en tiempo real para: {texto.upper()}**",
-                parse_mode="Markdown"
-            )
-            
-        # Enviar texto completo con el análisis
-        await update.message.reply_text(
-            f"📋 **Análisis y Coordenadas Exactas:**\n\n{texto_respuesta}",
-            parse_mode="Markdown"
-        )
-            
-    except Exception as e:
-        logger.error(f"Error generando análisis autónomo: {e}", exc_info=True)
-        await update.message.reply_text(f"Ocurrió un error procesando tu solicitud: {str(e)}")
-
-async def analizar_imagen_ia(update: Update, context):
-    try:
-        await update.message.reply_text("🔍 Analizando imagen y calculando niveles ICT...")
-        foto_archivo = await update.message.photo[-1].get_file()
-        foto_bytes = await foto_archivo.download_as_bytearray()
-        
-        imagen_part = {'mime_type': 'image/jpeg', 'data': bytes(foto_bytes)}
-        prompt_vision = (
-            "Analiza este gráfico bajo metodología ICT basándote en el precio visible. "
-            "Formato obligatorio al final:\nENTRADA: [número]\nTP: [número]\nSL: [número]"
-        )
-        
         respuesta = model.generate_content([prompt_vision, imagen_part], safety_settings=safety_settings)
         texto_respuesta = respuesta.text
         
+        # Valores de respaldo predeterminados
         entrada, tp, sl = 80750.00, 80900.00, 80600.00
+        
         match_ent = re.search(r"ENTRADA:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
         match_tp = re.search(r"TP:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
         match_sl = re.search(r"SL:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
@@ -165,27 +158,48 @@ async def analizar_imagen_ia(update: Update, context):
         if match_tp: tp = float(match_tp.group(1))
         if match_sl: sl = float(match_sl.group(1))
         
-        ruta_grafico = generar_grafico_posicion("Gráfico Analizado", entrada, tp, sl)
+        # Generar gráfico dinámico
+        ruta_grafico = generar_grafico_posicion("TradingView Setup", entrada, tp, sl)
         
+        # Enviar foto del gráfico
         with open(ruta_grafico, 'rb') as photo:
             await update.message.reply_photo(
                 photo=photo,
-                caption="📈 **Gráfico Analizado con Niveles Reales**",
+                caption="📈 **Gráfico ICT con Niveles Calculados**",
                 parse_mode="Markdown"
             )
             
+        # Enviar análisis detallado y validación de datos
         await update.message.reply_text(
-            f"📋 **Análisis Detallado:**\n\n{texto_respuesta}",
+            f"📋 **Análisis y Validación de Datos Esenciales:**\n\n{texto_respuesta}",
             parse_mode="Markdown"
         )
+        
     except Exception as e:
-        logger.error(f"Error procesando imagen: {e}", exc_info=True)
-        await update.message.reply_text("No se pudo procesar la imagen.")
+        logger.error(f"Error procesando análisis interactivo: {e}", exc_info=True)
+        await update.message.reply_text(f"Ocurrió un error procesando tu solicitud: {str(e)}")
+        
+    return ConversationHandler.END
 
-# Registrar manejadores
+async def cancel(update: Update, context):
+    await update.message.reply_text("Operación cancelada.")
+    return ConversationHandler.END
+
+# Configuración del ConversationHandler para el flujo paso a paso
+conv_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(button_handler, pattern="^start_analysis$")],
+    states={
+        ASK_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_details)],
+        ASK_PHOTO: [MessageHandler(filters.PHOTO, receive_photo_and_analyze)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel)],
+)
+
+# Registrar comandos y manejadores en la app de Telegram
 telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, responder_con_ia))
-telegram_app.add_handler(MessageHandler(filters.PHOTO, analizar_imagen_ia))
+telegram_app.add_handler(conv_handler)
+# Mantener mensaje de texto libre por si acaso le escriben directamente el activo sin usar el botón
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_details))
 
 # ---------------------------------------------------------
 # CONFIGURACIÓN DEL BUCLE Y WEBHOOK
@@ -218,7 +232,7 @@ def webhook():
 
 @app.route("/")
 def index():
-    return "Bot de Trading Autónomo Activo", 200
+    return "Bot de Trading Autónomo Interactivo Activo", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
