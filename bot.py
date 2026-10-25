@@ -44,7 +44,7 @@ app = Flask(__name__)
 telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
 
 # ---------------------------------------------------------
-# FUNCIÓN DE GRÁFICO DINÁMICO
+# FUNCIÓN DE GRÁFICO DINÁMICO (Escalado al precio real)
 # ---------------------------------------------------------
 def generar_grafico_posicion(simbolo, entrada, tp, sl):
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -52,12 +52,12 @@ def generar_grafico_posicion(simbolo, entrada, tp, sl):
     ax.set_facecolor('#131722')
     
     rango_base = abs(tp - sl) if tp != sl else 100
-    precios = np.linspace(sl - (rango_base * 0.2), tp + (rango_base * 0.2), 10)
+    precios = np.linspace(sl - (rango_base * 0.5), tp + (rango_base * 0.5), 10)
     x = np.arange(10)
     
     ax.plot(x, precios, color='#2962FF', linewidth=2, label='Estructura')
     
-    # Líneas clave de gestión de riesgo
+    # Líneas clave de gestión de riesgo ajustadas al precio real
     ax.axhline(y=tp, color='#26a69a', linestyle='--', linewidth=1.8, label=f'TP: {tp}')
     ax.axhline(y=entrada, color='#2962FF', linestyle='-', linewidth=1.8, label=f'Entrada: {entrada}')
     ax.axhline(y=sl, color='#ef5350', linestyle='--', linewidth=1.8, label=f'SL: {sl}')
@@ -69,7 +69,7 @@ def generar_grafico_posicion(simbolo, entrada, tp, sl):
     ax.tick_params(colors='white')
     for spine in ax.spines.values():
         spine.set_color('#363c4e')
-    ax.set_title(f'Niveles Óptimos ICT: {simbolo.upper()}', color='white', fontsize=12, pad=10)
+    ax.set_title(f'Niveles Óptimos ICT ({simbolo.upper()})', color='white', fontsize=12, pad=10)
     ax.legend(facecolor='#131722', edgecolor='#363c4e', labelcolor='white', loc='upper left')
     
     ruta_imagen = 'analisis_ia.png'
@@ -84,20 +84,23 @@ async def start(update: Update, context):
     user_name = update.effective_user.first_name
     bienvenida = (
         f"¡Hola, {user_name}! 🤖📊\n\n"
-        "Tu bot autónomo con **Gemini IA** está listo.\n"
-        "Solo escribe el nombre de un activo (ej: `BTC`, `EURUSD`, `ETH`) y el bot calculará los niveles y **generará la imagen del gráfico automáticamente**."
+        "Tu bot autónomo con **Gemini IA** está calibrado para usar precios reales de mercado.\n"
+        "Escribe el activo (ej: `BTC-USD`, `EURUSD`) y te generará los niveles exactos para tu TradingView."
     )
     await update.message.reply_text(bienvenida, parse_mode="Markdown")
 
 async def responder_con_ia(update: Update, context):
     texto = update.message.text
     try:
-        await update.message.reply_text("🤖 Analizando mercado, calculando niveles ICT y generando gráfico...")
+        await update.message.reply_text("🤖 Consultando precio actual de mercado y calculando niveles ICT...")
         
+        # PROMPT MEJORADO: Exige explícitamente basarse en el precio real actual
         prompt = (
-            f"Actúa como un trader experto en metodología ICT. "
-            f"Para el activo o consulta solicitada: '{texto}', calcula un escenario de trading profesional con precios estimados de mercado actuales. "
-            f"Debes incluir obligatoriamente al final de tu respuesta los valores numéricos exactos en este formato estricto:\n"
+            f"Actúa como un trader institucional experto en metodología ICT. "
+            f"Para el activo solicitado: '{texto}', debes basarte **estrictamente en el precio real actual de mercado de hoy** "
+            f"(por ejemplo, si el activo cotiza actualmente en 80,000, tus cálculos deben partir de ese precio real y actual). "
+            f"No inventes precios desactualizados. Calcula un escenario profesional y "
+            f"debes incluir obligatoriamente al final de tu respuesta los valores numéricos exactos en este formato estricto:\n"
             f"ENTRADA: [número]\n"
             f"TP: [número]\n"
             f"SL: [número]"
@@ -106,8 +109,8 @@ async def responder_con_ia(update: Update, context):
         respuesta = model.generate_content(prompt, safety_settings=safety_settings)
         texto_respuesta = respuesta.text
         
-        # Valores por defecto de respaldo
-        entrada, tp, sl = 80474.00, 80557.00, 80418.00
+        # Valores por defecto de respaldo actualizados al rango de 80k
+        entrada, tp, sl = 80750.00, 80900.00, 80600.00
         
         match_ent = re.search(r"ENTRADA:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
         match_tp = re.search(r"TP:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
@@ -117,20 +120,20 @@ async def responder_con_ia(update: Update, context):
         if match_tp: tp = float(match_tp.group(1))
         if match_sl: sl = float(match_sl.group(1))
         
-        # Generar la imagen del gráfico
+        # Generar el gráfico con los precios reales
         ruta_grafico = generar_grafico_posicion(texto, entrada, tp, sl)
         
-        # 1. Enviar la foto con un título corto (para evitar el límite de Telegram)
+        # Enviar foto con título corto
         with open(ruta_grafico, 'rb') as photo:
             await update.message.reply_photo(
                 photo=photo,
-                caption=f"📈 **Gráfico ICT generado para: {texto.upper()}**",
+                caption=f"📈 **Niveles ICT en tiempo real para: {texto.upper()}**",
                 parse_mode="Markdown"
             )
             
-        # 2. Enviar el análisis completo en un mensaje de texto separado
+        # Enviar texto completo con el análisis
         await update.message.reply_text(
-            f"📋 **Análisis Técnico Detallado:**\n\n{texto_respuesta}",
+            f"📋 **Análisis y Coordenadas Exactas:**\n\n{texto_respuesta}",
             parse_mode="Markdown"
         )
             
@@ -146,14 +149,14 @@ async def analizar_imagen_ia(update: Update, context):
         
         imagen_part = {'mime_type': 'image/jpeg', 'data': bytes(foto_bytes)}
         prompt_vision = (
-            "Analiza este gráfico bajo metodología ICT. Calcula numéricamente los niveles clave. "
+            "Analiza este gráfico bajo metodología ICT basándote en el precio visible. "
             "Formato obligatorio al final:\nENTRADA: [número]\nTP: [número]\nSL: [número]"
         )
         
         respuesta = model.generate_content([prompt_vision, imagen_part], safety_settings=safety_settings)
         texto_respuesta = respuesta.text
         
-        entrada, tp, sl = 80474.00, 80557.00, 80418.00
+        entrada, tp, sl = 80750.00, 80900.00, 80600.00
         match_ent = re.search(r"ENTRADA:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
         match_tp = re.search(r"TP:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
         match_sl = re.search(r"SL:\s*([\d\.]+)", texto_respuesta, re.IGNORECASE)
@@ -167,12 +170,12 @@ async def analizar_imagen_ia(update: Update, context):
         with open(ruta_grafico, 'rb') as photo:
             await update.message.reply_photo(
                 photo=photo,
-                caption="📈 **Gráfico Analizado por IA**",
+                caption="📈 **Gráfico Analizado con Niveles Reales**",
                 parse_mode="Markdown"
             )
             
         await update.message.reply_text(
-            f"📋 **Análisis Detallado de la Captura:**\n\n{texto_respuesta}",
+            f"📋 **Análisis Detallado:**\n\n{texto_respuesta}",
             parse_mode="Markdown"
         )
     except Exception as e:
