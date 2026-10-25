@@ -123,7 +123,6 @@ async def responder_con_ia(update: Update, context):
         await update.message.reply_text("Ocurrió un error procesando tu solicitud de trading.")
 
 async def analizar_imagen_ia(update: Update, context):
-    # Por si acaso quieres enviar una foto en el futuro, se mantiene funcional también
     try:
         await update.message.reply_text("🔍 Analizando imagen y calculando niveles ICT...")
         foto_archivo = await update.message.photo[-1].get_file()
@@ -184,9 +183,9 @@ async def setup_webhook():
 asyncio.run_coroutine_threadsafe(setup_webhook(), loop)
 
 # ---------------------------------------------------------
-# RUTAS DEL SERVIDOR WEB (FLASK)
+# RUTAS DEL SERVIDOR WEB (FLASK) - CORREGIDO CON EL '@'
 # ---------------------------------------------------------
-app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
+@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
     json_update = request.get_json(force=True)
     update = Update.de_json(json_update, telegram_app.bot)
