@@ -11,6 +11,7 @@ from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 # Configuración de logs
 logging.basicConfig(
@@ -25,10 +26,18 @@ GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 
-# Inicializar Google Gemini
+# Inicializar Google Gemini con el modelo correcto
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-3.8-flash')
+
+# Configuración de seguridad para evitar bloqueos por términos financieros
+safety_settings = {
+    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+}
 
 # Inicializar Flask y la App de Telegram
 app = Flask(__name__)
@@ -94,7 +103,8 @@ async def responder_con_ia(update: Update, context):
             f"SL: [número]"
         )
         
-        respuesta = model.generate_content(prompt)
+        # Generar contenido aplicando los filtros de seguridad relajados
+        respuesta = model.generate_content(prompt, safety_settings=safety_settings)
         texto_respuesta = respuesta.text
         
         # Valores por defecto de respaldo
@@ -119,8 +129,8 @@ async def responder_con_ia(update: Update, context):
             )
             
     except Exception as e:
-        logger.error(f"Error generando análisis autónomo: {e}")
-        await update.message.reply_text("Ocurrió un error procesando tu solicitud de trading.")
+        logger.error(f"Error detallado generando análisis autónomo: {e}", exc_info=True)
+        await update.message.reply_text(f"Ocurrió un error procesando tu solicitud: {str(e)}")
 
 async def analizar_imagen_ia(update: Update, context):
     try:
@@ -134,7 +144,7 @@ async def analizar_imagen_ia(update: Update, context):
             "Formato obligatorio al final:\nENTRADA: [número]\nTP: [número]\nSL: [número]"
         )
         
-        respuesta = model.generate_content([prompt_vision, imagen_part])
+        respuesta = model.generate_content([prompt_vision, imagen_part], safety_settings=safety_settings)
         texto_respuesta = respuesta.text
         
         entrada, tp, sl = 80474.00, 80557.00, 80418.00
@@ -155,7 +165,7 @@ async def analizar_imagen_ia(update: Update, context):
                 parse_mode="Markdown"
             )
     except Exception as e:
-        logger.error(f"Error procesando imagen: {e}")
+        logger.error(f"Error procesando imagen: {e}", exc_info=True)
         await update.message.reply_text("No se pudo procesar la imagen.")
 
 # Registrar manejadores
@@ -183,7 +193,7 @@ async def setup_webhook():
 asyncio.run_coroutine_threadsafe(setup_webhook(), loop)
 
 # ---------------------------------------------------------
-# RUTAS DEL SERVIDOR WEB (FLASK) - CORREGIDO CON EL '@'
+# RUTAS DEL SERVIDOR WEB (FLASK)
 # ---------------------------------------------------------
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
